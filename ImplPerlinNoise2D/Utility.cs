@@ -42,8 +42,11 @@ namespace ImplPerlinNoise2D.Utility.Storage {
     public class NoiseData {
         public string Name { get; set; }
         public int Seed { get; set; }
-        public int Frequency { get; set; }
+        public double Frequency { get; set; }
         public double Amplitude { get; set; }
+        public double Redistribution { get; set; }
+        public InterpolationMethod Interpolation { get; set; }
+        public int Smooth { get; set; }
         public double AttachPercentage { get; set; }
     }
 }

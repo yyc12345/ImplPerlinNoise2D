@@ -10,7 +10,7 @@ namespace ImplPerlinNoise2D {
 
         public static int MAP_SIZE = 512;
 
-        public static Bitmap Generate(List<ImplPerlinNoise2D.Utility.Storage.NoiseData> data) {
+        public static Bitmap Generate(List<ImplPerlinNoise2D.Utility.Storage.NoiseData> data, bool useColorful) {
             var img = new ImplPerlinNoise2D.Utility.Image.BitmapOperator(512, 512);
 
             var count = data.Count;
@@ -18,11 +18,11 @@ namespace ImplPerlinNoise2D {
             double max = 0;
             for (int i = 0; i < count; i++) {
                 perlinList.Add(new PerlinNoise(data[i].Seed, data[i].Frequency));
-                max += data[i].Amplitude * data[i].AttachPercentage;
+                max += Math.Pow(data[i].Amplitude, data[i].Redistribution) * data[i].AttachPercentage;
             }
 
             //todo: find the proper relation of max. maybe is 1*sqrt(2) ?
-            max = 1.5;
+            //max = 1.5;
             double calc = 0;
             double cache = 0;
             for (int y = 0; y < MAP_SIZE; y++) {
@@ -31,34 +31,86 @@ namespace ImplPerlinNoise2D {
                     cache = 0;
                     for (int i = 0; i < count; i++) {
                         perlinList[i].GetNoise(x, y, ref cache);
-                        calc += cache * data[i].Amplitude * data[i].AttachPercentage;
+                        calc += (cache < 0 ? -1 : 1) * Math.Pow(Math.Abs(cache * data[i].Amplitude), data[i].Redistribution) * data[i].AttachPercentage;
                     }
-                    img.SetPixel(x, y, JudgeValue(calc, max));
+                    img.SetPixel(x, y, JudgeValue(calc, max, useColorful));
                 }
             }
 
             return img.Close();
         }
 
-        static ImplPerlinNoise2D.Utility.Image.ColorRGB JudgeValue(double value, double max) {
+        static ImplPerlinNoise2D.Utility.Image.ColorRGB JudgeValue(double value, double max, bool isColorful) {
             value += max;
-            if (value < 0) return new Utility.Image.ColorRGB(255, 0, 0);
-            if (value > 2 * max) return new Utility.Image.ColorRGB(255, 0, 0);
+            if (value < 0) return (isColorful ? new Utility.Image.ColorRGB(255, 255, 255) : new Utility.Image.ColorRGB(255, 0, 0));
+            if (value > 2 * max) return (isColorful ? new Utility.Image.ColorRGB(255, 255, 255) : new Utility.Image.ColorRGB(255, 0, 0));
 
-            var realValue = 255 * (value / (2 * max));
-            return new Utility.Image.ColorRGB(realValue, realValue, realValue);
+            var percent = value / (2 * max);
+            if (isColorful) return HSBPureColorToRGB(300 * (1 - percent));
+            return new Utility.Image.ColorRGB(255 * percent, 255 * percent, 255 * percent);
+        }
+
+        //rotate from 0 -> 360. Red -> Green -> Blue -> Red
+        static ImplPerlinNoise2D.Utility.Image.ColorRGB HSBPureColorToRGB(double rotate) {
+            double valuePerFragement = (double)360 / (double)6;
+            int fragement = (int)(rotate / valuePerFragement);
+            double remainPercent = (rotate - fragement * valuePerFragement) / valuePerFragement;
+            var res = new ImplPerlinNoise2D.Utility.Image.ColorRGB();
+            switch (fragement) {
+                case 0:
+                case 6:
+                    res.R = 255;
+                    res.G = 255 * remainPercent;
+                    res.B = 0;
+                    break;
+                case 1:
+                    res.R = 255 * (1 - remainPercent);
+                    res.G = 255;
+                    res.B = 0;
+                    break;
+                case 2:
+                    res.R = 0;
+                    res.G = 255;
+                    res.B = 255 * remainPercent;
+                    break;
+                case 3:
+                    res.R = 0;
+                    res.G = 255 * (1 - remainPercent);
+                    res.B = 255;
+                    break;
+                case 4:
+                    res.R = 255 * remainPercent;
+                    res.G = 0;
+                    res.B = 255;
+                    break;
+                case 5:
+                    res.R = 255;
+                    res.G = 0;
+                    res.B = 255 * (1 - remainPercent);
+                    break;
+                default:
+                    res.R = 255;
+                    res.G = 255;
+                    res.B = 255;
+                    break;
+            }
+            return res;
         }
 
     }
 
     public class PerlinNoise {
-        public PerlinNoise(int seed, int frequency) {
+        public PerlinNoise(int seed, double frequency) {
             rnd = new Random(seed);
-            freq = frequency;
 
-            preRow = new double[freq + 2];
-            nowRow = new double[freq + 2];
-            for (int i = 0; i < freq + 2; i++) {
+            //process freq
+            freq = frequency;
+            intFreq = (int)freq;
+            if (freq != intFreq) intFreq++;
+
+            preRow = new double[intFreq + 2];
+            nowRow = new double[intFreq + 2];
+            for (int i = 0; i < intFreq + 2; i++) {
                 nowRow[i] = rnd.NextDouble();
             }
         }
@@ -102,8 +154,9 @@ namespace ImplPerlinNoise2D {
         }
 
         Random rnd;
-        int freq;
-        double wavelength { get { return (double)(Kernel.MAP_SIZE) / (double)freq; } }
+        double freq;
+        int intFreq;
+        double wavelength { get { return (double)(Kernel.MAP_SIZE) / freq; } }
 
         int nowRowIndex = -1;
         double[] preRow;
@@ -111,7 +164,7 @@ namespace ImplPerlinNoise2D {
 
         void Step() {
             nowRowIndex++;
-            for (int i = 0; i < freq + 2; i++) {
+            for (int i = 0; i < intFreq + 2; i++) {
                 preRow[i] = nowRow[i];
                 nowRow[i] = rnd.NextDouble();
             }
@@ -119,17 +172,41 @@ namespace ImplPerlinNoise2D {
 
         double Influence(double cornerRotate, Utility.Vector pos) {
             cornerRotate *= Math.PI * 2;
-            var toward = new Utility.Vector(
-                Math.Cos(cornerRotate),
-                Math.Sin(cornerRotate));
+            //var toward = new Utility.Vector(
+            //    Math.Cos(cornerRotate),
+            //    Math.Sin(cornerRotate));
+            var toward = new Utility.Vector();
+            if (cornerRotate < Math.PI / 4 || cornerRotate > 7 * Math.PI / 4) {
+                toward.X = 1;
+                toward.Y = Math.Sin(cornerRotate);
+            } else if (cornerRotate < 3 * Math.PI / 4) {
+                toward.X = Math.Cos(cornerRotate);
+                toward.Y = 1;
+            } else if (cornerRotate < 5 * Math.PI / 4) {
+                toward.X = -1;
+                toward.Y = Math.Sin(cornerRotate);
+            } else {
+                toward.X = Math.Cos(cornerRotate);
+                toward.Y = -1;
+            }
+
             return toward * pos;
         }
 
-        //todo: optimize this func
         double Fade(double pos) {
             return 6 * Math.Pow(pos, 5) - 15 * Math.Pow(pos, 4) + 10 * Math.Pow(pos, 3);
         }
 
     }
 
+    public enum InterpolationMethod : Int32 {
+        NearestNeighborInterpolation,
+        BilinearInterpolation,
+        BicubicInterpolation,
+        SineInterpolation,
+        //Ken Perlin(3*t^2-2*t^3)
+        KenPerlinInterpolation,
+        //Optimized Ken Perlin(6*t^5-15*t^4+10*t^3)
+        OptimizedKenPerlinInterpolation,
+    }
 }
