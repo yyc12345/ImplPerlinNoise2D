@@ -16,6 +16,7 @@ namespace ImplPerlinNoise2D {
             comboBox_interpolation.SelectedIndex = 5;
             toolTip1.SetToolTip(button4, "Update selected item.");
             toolTip1.SetToolTip(pictureBox_result, "Double click to save result.");
+            toolTip1.SetToolTip(textBox_smooth, "This config is not supported now.");
 
             //load data
             noiseListData = ImplPerlinNoise2D.Utility.Storage.StorageManager.Read();

@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Drawing;
+using Troschuetz.Random.Generators;
+using Troschuetz.Random.Distributions.Continuous;
+using Troschuetz.Random;
 
 namespace ImplPerlinNoise2D {
 
@@ -17,7 +20,7 @@ namespace ImplPerlinNoise2D {
             var perlinList = new List<PerlinNoise>();
             double max = 0;
             for (int i = 0; i < count; i++) {
-                perlinList.Add(new PerlinNoise(data[i].Seed, data[i].Frequency));
+                perlinList.Add(new PerlinNoise(data[i].Seed, data[i].Frequency, data[i].Interpolation));
                 max += Math.Pow(data[i].Amplitude, data[i].Redistribution) * data[i].AttachPercentage;
             }
 
@@ -100,74 +103,72 @@ namespace ImplPerlinNoise2D {
     }
 
     public class PerlinNoise {
-        public PerlinNoise(int seed, double frequency) {
-            rnd = new Random(seed);
-
-            //process freq
+        public PerlinNoise(int seed, double frequency, InterpolationMethod interpol) {
             freq = frequency;
-            intFreq = (int)freq;
-            if (freq != intFreq) intFreq++;
+            this.seed = seed;
+            interpolation = interpol;
 
-            preRow = new double[intFreq + 2];
-            nowRow = new double[intFreq + 2];
+            var intFreq = (int)freq;
+            if (intFreq != freq) intFreq++;
+            rndEngine = new TRandom(new Troschuetz.Random.Generators.StandardGenerator(seed));
+
+            //generate row seed
+            rowSeed = new uint[intFreq + 2];
             for (int i = 0; i < intFreq + 2; i++) {
-                nowRow[i] = rnd.NextDouble();
+                rowSeed[i] = rndEngine.NextUInt();
             }
         }
 
         public void GetNoise(double x, double y, ref double res) {
-            if (y == (nowRowIndex + 1) * wavelength) {
-                //use 1D mode
-                var basex = (int)(x / wavelength);
-                var pos = new Utility.Vector(0, 0);
-                pos.X = (x - basex * wavelength) / wavelength;
-                var n0 = Influence(nowRow[basex], pos);
-                pos.X = (x - (basex + 1) * wavelength) / wavelength;
-                var n1 = Influence(nowRow[basex + 1], pos);
+            var basex = (int)(x / wavelength);
+            var basey = (int)(y / wavelength);
 
-                var x_shortage = (x - basex * wavelength) / wavelength;
-                res = n0 * (1 - Fade(x_shortage)) + n1 * Fade(x_shortage);
-            } else {
-                if (y > (nowRowIndex + 1) * wavelength) Step();
-                //use 2D mode
-                var basex = (int)(x / wavelength);
-                var pos = new Utility.Vector(0, 0);
-
-                pos.X = (x - basex * wavelength) / wavelength; pos.Y = (y - nowRowIndex * wavelength) / wavelength;
-                var n00 = Influence(preRow[basex], pos);
-
-                pos.X = (x - (basex + 1) * wavelength) / wavelength;
-                var n10 = Influence(preRow[basex + 1], pos);
-
-                pos.X = (x - basex * wavelength) / wavelength; pos.Y = (y - (nowRowIndex + 1) * wavelength) / wavelength;
-                var n01 = Influence(nowRow[basex], pos);
-
-                pos.X = (x - (basex + 1) * wavelength) / wavelength;
-                var n11 = Influence(nowRow[basex + 1], pos);
-
-                var x_shortage = (x - basex * wavelength) / wavelength;
-                var y_shortage = (y - nowRowIndex * wavelength) / wavelength;
-                var nx0 = n00 * (1 - Fade(x_shortage)) + n10 * Fade(x_shortage);
-                var nx1 = n01 * (1 - Fade(x_shortage)) + n11 * Fade(x_shortage);
-                res = nx0 * (1 - Fade(y_shortage)) + nx1 * Fade(y_shortage);
+            if (basex == x && basey == y) {
+                res = 0;
+                return;
             }
+
+            //get gradient
+            var g00 = GetGradient(basex, basey);
+            var g10 = GetGradient(basex + 1, basey);
+            var g01 = GetGradient(basex, basey + 1);
+            var g11 = GetGradient(basex + 1, basey + 1);
+
+            var pos = new Utility.Vector(0, 0);
+
+            pos.X = (x - basex * wavelength) / wavelength; pos.Y = (y - basey * wavelength) / wavelength;
+            var n00 = Influence(g00, pos);
+
+            pos.X = (x - (basex + 1) * wavelength) / wavelength;
+            var n10 = Influence(g10, pos);
+
+            pos.X = (x - basex * wavelength) / wavelength; pos.Y = (y - (basey + 1) * wavelength) / wavelength;
+            var n01 = Influence(g01, pos);
+
+            pos.X = (x - (basex + 1) * wavelength) / wavelength;
+            var n11 = Influence(g11, pos);
+
+            var x_shortage = (x - basex * wavelength) / wavelength;
+            var y_shortage = (y - basey * wavelength) / wavelength;
+            var nx0 = n00 * (1 - Fade(x_shortage)) + n10 * Fade(x_shortage);
+            var nx1 = n01 * (1 - Fade(x_shortage)) + n11 * Fade(x_shortage);
+            res = nx0 * (1 - Fade(y_shortage)) + nx1 * Fade(y_shortage);
+
         }
 
-        Random rnd;
+        int seed;
+        TRandom rndEngine;
+        InterpolationMethod interpolation;
+        uint[] rowSeed;
         double freq;
-        int intFreq;
         double wavelength { get { return (double)(Kernel.MAP_SIZE) / freq; } }
 
-        int nowRowIndex = -1;
-        double[] preRow;
-        double[] nowRow;
+        double GetGradient(int x, int y) {
+            rndEngine.Reset(rowSeed[y]);
+            for (int i = 0; i < x; i++)
+                rndEngine.NextDouble();
 
-        void Step() {
-            nowRowIndex++;
-            for (int i = 0; i < intFreq + 2; i++) {
-                preRow[i] = nowRow[i];
-                nowRow[i] = rnd.NextDouble();
-            }
+            return rndEngine.NextDouble();
         }
 
         double Influence(double cornerRotate, Utility.Vector pos) {
@@ -194,7 +195,22 @@ namespace ImplPerlinNoise2D {
         }
 
         double Fade(double pos) {
-            return 6 * Math.Pow(pos, 5) - 15 * Math.Pow(pos, 4) + 10 * Math.Pow(pos, 3);
+            switch (this.interpolation) {
+                case InterpolationMethod.NearestNeighborInterpolation:
+                    return (pos > 0.5 ? 1 : 0);
+                case InterpolationMethod.BilinearInterpolation:
+                    return pos;
+                case InterpolationMethod.BicubicInterpolation:
+                    return pos;
+                case InterpolationMethod.SineInterpolation:
+                    return (1 - Math.Cos(Math.PI * pos)) / 2;
+                case InterpolationMethod.KenPerlinInterpolation:
+                    return 3 * Math.Pow(pos, 2) - 2 * Math.Pow(pos, 3);
+                case InterpolationMethod.OptimizedKenPerlinInterpolation:
+                    return 6 * Math.Pow(pos, 5) - 15 * Math.Pow(pos, 4) + 10 * Math.Pow(pos, 3);
+                default:
+                    return pos;
+            }
         }
 
     }
@@ -209,4 +225,5 @@ namespace ImplPerlinNoise2D {
         //Optimized Ken Perlin(6*t^5-15*t^4+10*t^3)
         OptimizedKenPerlinInterpolation,
     }
+
 }
